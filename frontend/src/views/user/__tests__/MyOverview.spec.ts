@@ -10,6 +10,12 @@ import { dashboardRoutes } from '@/router/routes/dashboard'
 vi.mock('@/api/wallet', () => ({ walletApi: { getBalance: vi.fn(), getTodayCost: vi.fn(), getTransactions: vi.fn() } }))
 vi.mock('@/api/billing', () => ({ billingApi: { listPlans: vi.fn(), listEntitlements: vi.fn() } }))
 vi.mock('@/api/usage', () => ({ usageApi: { getUsageRecords: vi.fn() } }))
+vi.mock('@/components/charts/BarChart.vue', () => ({
+  default: defineComponent({ props: ['data', 'stacked'], setup: props => () => h('div', { 'data-chart': 'bar', 'data-props': JSON.stringify(props) }) }),
+}))
+vi.mock('@/components/charts/DoughnutChart.vue', () => ({
+  default: defineComponent({ props: ['data'], setup: props => () => h('div', { 'data-chart': 'doughnut', 'data-props': JSON.stringify(props) }) }),
+}))
 
 let app: App
 let root: HTMLElement
@@ -44,12 +50,13 @@ afterEach(() => {
 describe('MyOverview', () => {
   it('loads four sections independently and keeps detail links in empty states', async () => {
     mount()
-    expect(root.querySelectorAll('[data-section]')).toHaveLength(4)
+    expect(root.querySelectorAll('[data-section]')).toHaveLength(6)
     await flush()
     expect(root.querySelectorAll('tbody tr')).toHaveLength(0)
     expect(root.querySelector('a[href="/dashboard/usage"]')).not.toBeNull()
     expect(root.querySelector('a[href="/dashboard/wallet"]')).not.toBeNull()
-    expect(usageApi.getUsageRecords).toHaveBeenCalledWith({ page: 1, page_size: 10 })
+    expect(usageApi.getUsageRecords).toHaveBeenCalledWith({ page: 1, page_size: 200 })
+    expect(root.querySelectorAll('[data-chart]')).toHaveLength(0)
     expect(walletApi.getTransactions).toHaveBeenCalledWith({ limit: 8, offset: 0 })
   })
 
@@ -82,7 +89,7 @@ describe('MyOverview', () => {
     vi.mocked(walletApi.getTransactions).mockRejectedValue(new Error('offline'))
     mount()
     await flush()
-    expect(root.querySelectorAll('[data-section] button')).toHaveLength(4)
+    expect(root.querySelectorAll('[data-section] button')).toHaveLength(6)
     expect(root.textContent).not.toContain('$0')
   })
 
@@ -128,8 +135,9 @@ describe('MyOverview', () => {
     expect(root.textContent).toContain('weekly-plan')
     expect(root.textContent).not.toContain('expired-plan')
     expect(root.textContent).not.toContain('inactive-plan')
-    expect(root.querySelectorAll('progress')).toHaveLength(1)
-    expect(root.querySelector('progress')?.value).toBe(30)
+    expect(root.querySelectorAll('[data-chart="doughnut"]')).toHaveLength(1)
+    expect(JSON.parse(root.querySelector('[data-chart="doughnut"]')!.getAttribute('data-props')!).data.datasets[0].data).toEqual([3, 7])
+    expect(root.textContent).toContain('30.0%')
     expect(root.textContent).toContain('$50')
     expect(root.textContent).toContain('$2')
   })
@@ -140,5 +148,55 @@ describe('MyOverview', () => {
     for (const path of ['endpoint-status', 'models', 'vscodex', 'referral']) {
       expect(children.some(route => route.path === path)).toBe(true)
     }
+  })
+
+  it('charts all returned records but keeps the first ten rows in API order', async () => {
+    vi.mocked(usageApi.getUsageRecords).mockResolvedValue({
+      records: Array.from({ length: 12 }, (_, index) => ({
+        id: String(index), model: `model-${index % 2}`, created_at: new Date().toISOString(),
+        billing_cost: index === 11 ? 50 : 1, cost: 99, usage_pricing_available: index !== 11,
+      })),
+      total: 12, page: 1, page_size: 200,
+    } as Awaited<ReturnType<typeof usageApi.getUsageRecords>>)
+    mount()
+    await flush()
+    const bar = JSON.parse(root.querySelector('[data-chart="bar"]')!.getAttribute('data-props')!)
+    expect(bar.stacked).toBe(false)
+    expect(bar.data.datasets[0].data).toEqual([...Array(13).fill(0), 11])
+    expect(bar.data.datasets[0].backgroundColor).toEqual([...Array(13).fill('#6366f1'), '#f59e0b'])
+    const share = JSON.parse(root.querySelector('[data-section="share"] [data-chart]')!.getAttribute('data-props')!)
+    expect(share.data.labels).toEqual(['model-0', 'model-1'])
+    expect(share.data.datasets[0].data).toEqual([6, 5])
+    const rows = root.querySelectorAll('[data-section="usage"] tbody tr')
+    expect(rows).toHaveLength(10)
+    expect(rows[0]?.textContent).toContain('model-0')
+    expect(rows[9]?.textContent).toContain('model-1')
+  })
+
+  it('shares usage loading and retry state across both charts and the table', async () => {
+    vi.mocked(usageApi.getUsageRecords).mockRejectedValueOnce(new Error('offline'))
+    mount()
+    for (const section of ['trend', 'share', 'usage']) {
+      expect(root.querySelector(`[data-section="${section}"]`)?.textContent).toContain('加载')
+    }
+    await flush()
+    root.querySelector<HTMLButtonElement>('[data-section="trend"] button')!.click()
+    await flush()
+    expect(usageApi.getUsageRecords).toHaveBeenCalledTimes(2)
+    expect(walletApi.getBalance).toHaveBeenCalledTimes(1)
+    for (const section of ['trend', 'share', 'usage']) {
+      expect(root.querySelector(`[data-section="${section}"]`)?.textContent).toContain('暂无记录')
+    }
+  })
+
+  it('keeps zero-cost records in the table without rendering empty charts', async () => {
+    vi.mocked(usageApi.getUsageRecords).mockResolvedValue({
+      records: [{ id: 'zero', model: 'free', cost: 0, created_at: new Date().toISOString() }],
+      total: 1, page: 1, page_size: 200,
+    } as Awaited<ReturnType<typeof usageApi.getUsageRecords>>)
+    mount()
+    await flush()
+    expect(root.querySelectorAll('tbody tr')).toHaveLength(1)
+    expect(root.querySelectorAll('[data-chart]')).toHaveLength(0)
   })
 })

@@ -1,6 +1,10 @@
 export const userMessages = {
   'zh-CN': {
     'overview.title': '我的概览',
+    'overview.trend': '花费趋势 · 近 14 天',
+    'overview.share': '模型花费占比',
+    'overview.period': '近 14 天',
+    'overview.other': '其他',
     'overview.balance': '钱包余额',
     'overview.today': '今日已花',
     'overview.plans': '我的套餐',
@@ -149,6 +153,10 @@ export const userMessages = {
   },
   'en-US': {
     'overview.title': 'My overview',
+    'overview.trend': 'Spending trend · Last 14 days',
+    'overview.share': 'Spending by model',
+    'overview.period': 'Last 14 days',
+    'overview.other': 'Other',
     'overview.balance': 'Wallet balance',
     'overview.today': 'Spent today',
     'overview.plans': 'My plans',

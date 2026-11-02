@@ -6,6 +6,10 @@ import { billingApi, type BillingPlan, type UserPlanEntitlement } from '@/api/bi
 import { usageApi, type UsageRecord } from '@/api/usage'
 import { CardSection, PageContainer, PageHeader } from '@/components/layout'
 import { EmptyState, LoadingState } from '@/components/common'
+import BarChart from '@/components/charts/BarChart.vue'
+import DoughnutChart from '@/components/charts/DoughnutChart.vue'
+import type { ChartOptions } from 'chart.js'
+import { aggregateDailyCost, aggregateModelShare } from './overviewCharts'
 import { useI18n } from '@/i18n'
 import { formatCurrency, formatDateShort, formatDateTime, formatTokens } from '@/utils/format'
 import { billingEntitlementLabels } from '@/utils/billingEntitlements'
@@ -34,6 +38,36 @@ const hasDailyQuota = computed(() => activePlans.value.some(item => item.entitle
 const walletAmount = computed(() => balance.value?.wallet_balance ?? balance.value?.wallet?.balance ?? balance.value?.balance)
 const money = (value: number | null | undefined) => value == null ? '-' : formatCurrency(value)
 const walletMoney = (value: number | null | undefined) => value == null ? '-' : formatWalletCurrency(value)
+const sections = ['balance', 'plans', 'trend', 'share', 'usage', 'bills'] as const
+const stateKey = (section: typeof sections[number]) => section === 'trend' || section === 'share' ? 'usage' : section
+const dailyCosts = computed(() => aggregateDailyCost(usage.value))
+const modelShares = computed(() => aggregateModelShare(usage.value))
+const chartTotal = computed(() => dailyCosts.value.reduce((sum, day) => sum + day.total, 0))
+const colors = ['#6366f1', '#f59e0b', '#10b981', '#38bdf8', '#a78bfa', '#94a3b8']
+const modelLabel = (item: ReturnType<typeof aggregateModelShare>[number]) => item.other ? t('overview.other') : item.model
+const trendData = computed(() => ({
+  labels: dailyCosts.value.map(day => day.label),
+  datasets: [{ data: dailyCosts.value.map(day => day.total), backgroundColor: dailyCosts.value.map((_, i) => i === dailyCosts.value.length - 1 ? '#f59e0b' : '#6366f1') }],
+}))
+const shareData = computed(() => ({
+  labels: modelShares.value.map(modelLabel),
+  datasets: [{ data: modelShares.value.map(item => item.total), backgroundColor: colors }],
+}))
+const trendOptions: ChartOptions<'bar'> = {
+  plugins: { legend: { display: false }, tooltip: { callbacks: { label: context => formatCurrency(Number(context.raw)) } } },
+}
+const shareOptions: ChartOptions<'doughnut'> = {
+  cutout: '75%',
+  plugins: { legend: { display: false }, tooltip: { callbacks: { label: context => `${context.label}: ${formatCurrency(Number(context.raw))}` } } },
+}
+const quotaOptions: ChartOptions<'doughnut'> = {
+  cutout: '78%', plugins: { legend: { display: false }, tooltip: { enabled: false } },
+}
+const quotaPercent = computed(() => quota.value && quota.value.total_usd > 0
+  ? Math.min(100, Math.max(0, quota.value.used_usd / quota.value.total_usd * 100)) : 0)
+const quotaData = computed(() => ({
+  datasets: [{ data: [Math.max(0, quota.value?.used_usd ?? 0), Math.max(0, quota.value?.remaining_usd ?? 0)], backgroundColor: ['#6366f1', '#e5e7eb'], borderWidth: 0 }],
+}))
 
 async function load(section: keyof typeof states) {
   states[section] = { loading: true, error: false }
@@ -47,7 +81,7 @@ async function load(section: keyof typeof states) {
       entitlements.value = benefits.items
       plans.value = catalog.items
     } else if (section === 'usage') {
-      usage.value = (await usageApi.getUsageRecords({ page: 1, page_size: 10 })).records
+      usage.value = (await usageApi.getUsageRecords({ page: 1, page_size: 200 })).records
     } else {
       transactions.value = (await walletApi.getTransactions({ limit: 8, offset: 0 })).items
     }
@@ -66,10 +100,10 @@ onMounted(() => {
 <template>
   <PageContainer>
     <PageHeader :title="t('overview.title')" />
-    <div class="space-y-6">
-      <CardSection v-for="section in (['balance', 'plans', 'usage', 'bills'] as const)" :key="section" :title="t(`overview.${section}`)" :data-section="section">
-        <LoadingState v-if="states[section].loading" :message="t('common.loading')" />
-        <EmptyState v-else-if="states[section].error" type="error" :title="t('overview.error')" :action-text="t('overview.retry')" :action-icon="RefreshCw" @action="load(section)" />
+    <div class="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <CardSection v-for="section in sections" :key="section" :title="t(`overview.${section}`)" :data-section="section" :class="['min-w-0', section === 'share' ? '' : section === 'usage' ? 'lg:col-span-2' : 'lg:col-span-3']">
+        <LoadingState v-if="states[stateKey(section)].loading" :message="t('common.loading')" />
+        <EmptyState v-else-if="states[stateKey(section)].error" type="error" :title="t('overview.error')" :action-text="t('overview.retry')" :action-icon="RefreshCw" @action="load(stateKey(section))" />
         <template v-else-if="section === 'balance'">
           <EmptyState v-if="!balance?.wallet && walletAmount == null && !balance?.unlimited" :title="t('overview.noWallet')" />
           <dl v-else class="grid gap-6 sm:grid-cols-2">
@@ -97,10 +131,35 @@ onMounted(() => {
               <EmptyState v-else-if="states.balance.error" type="error" :title="t('overview.error')" :action-text="t('overview.retry')" :action-icon="RefreshCw" @action="load('balance')" />
               <template v-else-if="quota?.has_active">
                 <p class="text-sm">{{ t('overview.quota', { used: money(quota.used_usd), total: money(quota.total_usd), remaining: money(quota.remaining_usd) }) }}</p>
-                <progress class="h-2 w-full accent-primary" :value="quota.total_usd > 0 ? Math.min(100, Math.max(0, quota.used_usd / quota.total_usd * 100)) : 0" max="100" :aria-label="t('overview.daily')" />
+                <div class="relative h-36 w-36" role="img" :aria-label="`${t('overview.daily')}: ${quotaPercent.toFixed(1)}%`">
+                  <DoughnutChart :data="quotaData" :options="quotaOptions" :height="144" />
+                  <span class="pointer-events-none absolute inset-0 flex items-center justify-center text-xl font-semibold">{{ quotaPercent.toFixed(1) }}%</span>
+                </div>
               </template>
               <p v-else class="text-sm text-muted-foreground">{{ t('overview.unavailable') }}</p>
             </div>
+          </div>
+        </template>
+        <template v-else-if="section === 'trend' || section === 'share'">
+          <EmptyState v-if="chartTotal <= 0" :title="t('overview.empty')" />
+          <div v-else-if="section === 'trend'" class="h-56" role="img" :aria-label="t('overview.trend')">
+            <BarChart :data="trendData" :options="trendOptions" :stacked="false" :height="224" />
+          </div>
+          <div v-else class="space-y-4">
+            <div class="relative mx-auto aspect-square w-48 max-w-full" role="img" :aria-label="`${t('overview.share')}: ${money(chartTotal)}`">
+              <DoughnutChart :data="shareData" :options="shareOptions" :height="192" />
+              <div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-9 text-center">
+                <span class="text-xs text-muted-foreground">{{ t('overview.period') }}</span>
+                <span class="w-full break-all text-lg font-semibold">{{ money(chartTotal) }}</span>
+              </div>
+            </div>
+            <ul class="space-y-2 text-sm">
+              <li v-for="(item, index) in modelShares" :key="index" class="flex flex-wrap items-center gap-2">
+                <span class="h-2.5 w-2.5 shrink-0 rounded-sm" :style="{ backgroundColor: colors[index] }" />
+                <span class="min-w-0 flex-1 break-all">{{ modelLabel(item) }}</span>
+                <span>{{ money(item.total) }}</span><span class="text-muted-foreground">{{ item.pct.toFixed(1) }}%</span>
+              </li>
+            </ul>
           </div>
         </template>
         <template v-else-if="section === 'usage'">
@@ -108,7 +167,7 @@ onMounted(() => {
           <div v-else class="overflow-x-auto">
             <table class="w-full text-left text-sm">
               <thead class="text-muted-foreground"><tr><th class="p-2">{{ t('overview.time') }}</th><th class="p-2">{{ t('overview.model') }}</th><th class="p-2">{{ t('overview.tokens') }}</th><th class="p-2">{{ t('overview.cost') }}</th></tr></thead>
-              <tbody><tr v-for="record in usage" :key="record.id" class="border-t">
+              <tbody><tr v-for="record in usage.slice(0, 10)" :key="record.id" class="border-t">
                 <td class="p-2 whitespace-nowrap">{{ formatDateTime(record.created_at) }}</td><td class="p-2 break-all">{{ record.model }}</td>
                 <td class="p-2">{{ record.usage_available === false || record.total_tokens == null ? '-' : formatTokens(record.total_tokens) }}</td><td class="p-2 whitespace-nowrap">{{ record.usage_pricing_available === false ? '-' : money(record.billing_cost ?? record.cost) }}</td>
               </tr></tbody>
