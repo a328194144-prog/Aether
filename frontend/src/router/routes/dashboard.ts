@@ -10,7 +10,7 @@ export const dashboardRoutes: RouteRecordRaw[] = [
       {
         path: '',
         name: 'Dashboard',
-        component: view(() => import('@/views/shared/Dashboard.vue'))
+        component: view(() => import('@/views/user/MyOverview.vue'))
       },
       {
         path: 'api-keys',

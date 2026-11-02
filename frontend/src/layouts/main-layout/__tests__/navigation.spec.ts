@@ -22,7 +22,7 @@ function route(path: string, name?: string, meta: Record<string, unknown> = {}, 
 }
 
 describe('main layout navigation builder', () => {
-  it.each([true, false])('shows referral navigation only when the extension is active=%s for administrators and users', active => {
+  it.each([true, false])('preserves admin referral visibility but hides user referral when active=%s', active => {
     const referral: ModuleStatus = {
       name: 'referral', available: true, enabled: active, active,
       config_validated: true, config_error: null, display_name: '邀请返利',
@@ -34,7 +34,7 @@ describe('main layout navigation builder', () => {
     const admin = buildNavigation({ ...options, canAccessAdmin: true }).flatMap(group => group.items)
     expect(admin.filter(item => item.href === '/admin/referrals')).toHaveLength(active ? 1 : 0)
     const user = buildNavigation({ ...options, canAccessAdmin: false }).flatMap(group => group.items)
-    expect(user.some(item => item.href === '/dashboard/referral')).toBe(active)
+    expect(user.some(item => item.href === '/dashboard/referral')).toBe(false)
     expect(user.some(item => item.href === '/admin/referrals')).toBe(false)
   })
 
@@ -53,13 +53,15 @@ describe('main layout navigation builder', () => {
 
     expect(navigation.map(group => group.title)).toEqual([
       'tx:nav.group.overview',
-      'tx:nav.group.resources',
       'tx:nav.group.account',
     ])
-    expect(navigation.flatMap(group => group.items.map(item => item.name))).toContain('tx:nav.myReferral')
+    expect(navigation.flatMap(group => group.items.map(item => item.href))).toEqual([
+      '/dashboard', '/dashboard/usage', '/dashboard/billing', '/dashboard/wallet', '/dashboard/api-keys',
+    ])
+    expect(navigation[0]?.items[0]?.name).toBe('tx:overview.title')
   })
 
-  it('exposes remote control to users and active administrators', () => {
+  it('exposes remote control only to active administrators', () => {
     const userNavigation = buildNavigation({
       canAccessAdmin: false,
       modules: {},
@@ -96,10 +98,7 @@ describe('main layout navigation builder', () => {
         .find(item => item.href === '/dashboard/vscodex')
     )
 
-    expect(findVscodeControl(userNavigation)).toMatchObject({
-      name: 'tx:nav.vscodex',
-      href: '/dashboard/vscodex',
-    })
+    expect(findVscodeControl(userNavigation)).toBeUndefined()
     expect(findVscodeControl(adminNavigation)).toMatchObject({
       name: '远程控制',
       href: '/dashboard/vscodex',

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref, type App } from 'vue'
 
 import SidebarNav from '@/components/layout/SidebarNav.vue'
+import { buildNavigation } from '@/layouts/main-layout/navigation'
 
 const mountedApps: Array<{ app: App, root: HTMLElement }> = []
 
@@ -32,6 +33,25 @@ afterEach(() => {
 })
 
 describe('SidebarNav', () => {
+  it('renders all five ordinary-user destinations when collapsed', () => {
+    const root = document.createElement('div')
+    document.body.appendChild(root)
+    const app = createApp({
+      setup: () => () => h(SidebarNav, {
+        items: buildNavigation({ canAccessAdmin: false, modules: {}, isModuleActive: () => true }),
+        activePath: '/dashboard',
+        collapsed: true,
+      }),
+    })
+    app.component('RouterLink', RouterLinkStub)
+    app.mount(root)
+    mountedApps.push({ app, root })
+    expect(Array.from(root.querySelectorAll('a')).map(link => link.getAttribute('href'))).toEqual([
+      '/dashboard', '/dashboard/usage', '/dashboard/billing', '/dashboard/wallet', '/dashboard/api-keys',
+    ])
+    expect(root.querySelector('a')?.getAttribute('aria-label')).toBe('overview.title')
+    expect(root.querySelectorAll('[data-sidebar-group-divider]')).toHaveLength(1)
+  })
   it('switches from labelled navigation to accessible icon-only links', async () => {
     const collapsed = ref(false)
     const root = document.createElement('div')

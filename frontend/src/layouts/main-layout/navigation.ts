@@ -3,7 +3,6 @@ import type { LucideIcon } from 'lucide-vue-next'
 import {
   Activity,
   BarChart3,
-  Box,
   Cog,
   CreditCard,
   Database,
@@ -73,7 +72,7 @@ export function buildNavigation(options: {
   isModuleActive: (name: string) => boolean
   t?: Translate
 }): NavigationGroup[] {
-  const { canAccessAdmin, modules, isModuleActive } = options
+  const { canAccessAdmin, modules } = options
   const t = options.t ?? ((key: MessageKey) => key)
 
   if (!canAccessAdmin) {
@@ -81,25 +80,16 @@ export function buildNavigation(options: {
       {
         title: t('nav.group.overview'),
         items: [
-          { name: t('nav.dashboard'), href: '/dashboard', icon: Home },
-          { name: t('nav.healthMonitor'), href: '/dashboard/endpoint-status', icon: Activity },
-        ]
-      },
-      {
-        title: t('nav.group.resources'),
-        items: [
-          { name: t('nav.modelCatalog'), href: '/dashboard/models', icon: Box },
-          { name: t('nav.apiKeys'), href: '/dashboard/api-keys', icon: Key },
-          { name: t('nav.vscodex'), href: '/dashboard/vscodex', icon: SquareTerminal },
+          { name: t('overview.title'), href: '/dashboard', icon: Home },
         ]
       },
       {
         title: t('nav.group.account'),
         items: [
+          { name: t('overview.usage'), href: '/dashboard/usage', icon: BarChart3 },
+          { name: t('overview.plans'), href: '/dashboard/billing', icon: Package },
           { name: t('nav.walletCenter'), href: '/dashboard/wallet', icon: Wallet },
-          { name: t('nav.billingCenter'), href: '/dashboard/billing', icon: Package },
-          ...(isModuleActive('referral') ? [{ name: t('nav.myReferral'), href: '/dashboard/referral', icon: Gift }] : []),
-          { name: t('nav.usageStats'), href: '/dashboard/usage', icon: BarChart3 },
+          { name: t('nav.apiKeys'), href: '/dashboard/api-keys', icon: Key },
         ]
       }
     ]

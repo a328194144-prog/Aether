@@ -12,7 +12,7 @@ const { getAllStatus, getUserStatus } = vi.hoisted(() => ({
 
 vi.mock('@/api/modules', () => ({ modulesApi: { getAllStatus, getUserStatus } }))
 
-describe('user referral navigation module loading', () => {
+describe('navigation module loading with referrals hidden from user navigation', () => {
   let app: App | undefined
   let container: HTMLDivElement
 
@@ -49,12 +49,13 @@ describe('user referral navigation module loading', () => {
     await nextTick()
   }
 
-  it.each([true, false])('shows the referral entry only when the user status is active=%s', async active => {
+  it.each([true, false])('loads only user status and keeps the referral entry hidden when active=%s', async active => {
     getUserStatus.mockResolvedValue({ referral: { name: 'referral', available: true, enabled: active, active } })
     mount(false)
     await settle()
 
-    expect(!!container.querySelector('a[href="/dashboard/referral"]')).toBe(active)
+    expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
+    expect(useModuleStore().isUserActive('referral')).toBe(active)
     expect(getUserStatus).toHaveBeenCalledTimes(1)
     expect(getAllStatus).not.toHaveBeenCalled()
   })
@@ -67,17 +68,20 @@ describe('user referral navigation module loading', () => {
     expect(useModuleStore().userLoaded).toBe(false)
   })
 
-  it('refreshes user status on remount after the administrator disables referrals', async () => {
+  it('refreshes user status on remount after referrals are disabled while keeping the entry hidden', async () => {
     getUserStatus.mockResolvedValueOnce({ referral: { name: 'referral', available: true, enabled: true, active: true } })
     mount(false)
     await settle()
-    expect(container.querySelector('a[href="/dashboard/referral"]')).not.toBeNull()
+    expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
+    expect(useModuleStore().isUserActive('referral')).toBe(true)
     app?.unmount()
 
     getUserStatus.mockResolvedValueOnce({ referral: { name: 'referral', available: true, enabled: false, active: false } })
     mount(false)
     await settle()
     expect(getUserStatus).toHaveBeenCalledTimes(2)
+    expect(getAllStatus).not.toHaveBeenCalled()
+    expect(useModuleStore().isUserActive('referral')).toBe(false)
     expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
   })
 
@@ -89,7 +93,7 @@ describe('user referral navigation module loading', () => {
     expect(getUserStatus).not.toHaveBeenCalled()
   })
 
-  it('loads the correct status when the role changes within the mounted layout', async () => {
+  it('loads status for role changes and refreshes user status while keeping the referral entry hidden', async () => {
     getUserStatus.mockResolvedValue({ referral: { name: 'referral', available: true, enabled: true, active: true } })
     getAllStatus.mockResolvedValue({})
     const canAccessAdmin = ref(true)
@@ -100,11 +104,23 @@ describe('user referral navigation module loading', () => {
     canAccessAdmin.value = false
     await nextTick()
     await settle()
-    expect(container.querySelector('a[href="/dashboard/referral"]')).not.toBeNull()
+    expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
+    expect(getUserStatus).toHaveBeenCalledTimes(1)
+    expect(useModuleStore().isUserActive('referral')).toBe(true)
 
     canAccessAdmin.value = true
     await nextTick()
     expect(getAllStatus).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
+
+    getUserStatus.mockResolvedValueOnce({ referral: { name: 'referral', available: true, enabled: false, active: false } })
+    canAccessAdmin.value = false
+    await nextTick()
+    await settle()
+    expect(getUserStatus).toHaveBeenCalledTimes(2)
+    expect(getAllStatus).toHaveBeenCalledTimes(1)
+    expect(useModuleStore().isUserActive('referral')).toBe(false)
+    expect(container.querySelector('a[href="/dashboard/referral"]')).toBeNull()
   })
 
   it('loads administrator status after a user becomes an administrator without remounting', async () => {
@@ -132,7 +148,7 @@ describe('user referral navigation module loading', () => {
     expect(store.userLoaded).toBe(true)
   })
 
-  it('clears a previously active entry on failure and can recover on retry', async () => {
+  it('clears previously active user module status on failure and can recover on retry', async () => {
     getUserStatus.mockResolvedValueOnce({ referral: { name: 'referral', available: true, enabled: true, active: true } })
     const store = useModuleStore()
     await store.fetchUserModules()
