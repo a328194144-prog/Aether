@@ -788,7 +788,6 @@ pub fn project_openai_image_api_request_body(
                 model_family,
                 OpenAiImageModelFamily::DallE2 | OpenAiImageModelFamily::DallE3
             )
-            || (model_family == OpenAiImageModelFamily::GptImage2 && value == "transparent")
             || (value == "transparent"
                 && !matches!(output_format.as_deref().unwrap_or("png"), "png" | "webp"))
         {
@@ -2775,6 +2774,68 @@ mod tests {
     }
 
     #[test]
+    fn image_api_projection_preserves_gpt_image_2_transparent_background() {
+        for output_format in [None, Some("png"), Some("webp")] {
+            let mut body = json!({
+                "model": "gpt-image-2",
+                "prompt": "generate image",
+                "background": "transparent",
+                "quality": "auto",
+                "size": "auto"
+            });
+            if let Some(format) = output_format {
+                body["output_format"] = json!(format);
+            }
+            let projected = project_openai_image_api_request_body(
+                &body,
+                "gpt-image-2",
+                OpenAiImageOperation::Generate,
+                10,
+            )
+            .expect("GPT Image 2 should accept transparent backgrounds");
+            assert_eq!(projected["background"], "transparent");
+
+            if output_format.is_none() {
+                let codex = project_codex_openai_image_api_request_body(
+                    &body,
+                    OpenAiImageOperation::Generate,
+                )
+                .expect("Codex should preserve transparent backgrounds without output_format");
+                assert_eq!(codex["background"], "transparent");
+            }
+        }
+    }
+
+    #[test]
+    fn image_api_projection_rejects_invalid_backgrounds() {
+        for (model, background) in [
+            ("gpt-image-2", "invalid"),
+            ("dall-e-2", "transparent"),
+            ("dall-e-2", "opaque"),
+            ("dall-e-2", "auto"),
+            ("dall-e-3", "transparent"),
+            ("dall-e-3", "opaque"),
+            ("dall-e-3", "auto"),
+        ] {
+            let body = json!({
+                "model": model,
+                "prompt": "generate image",
+                "background": background
+            });
+            assert!(
+                project_openai_image_api_request_body(
+                    &body,
+                    model,
+                    OpenAiImageOperation::Generate,
+                    10,
+                )
+                .is_none(),
+                "unsupported background should be rejected: {body}"
+            );
+        }
+    }
+
+    #[test]
     fn image_api_projection_enforces_model_field_profiles() {
         let gpt_image_2 = project_openai_image_api_request_body(
             &json!({
@@ -2796,7 +2857,8 @@ mod tests {
             json!({
                 "model": "gpt-image-2",
                 "prompt": "generate image",
-                "background": "transparent"
+                "background": "transparent",
+                "output_format": "jpeg"
             }),
             json!({
                 "model": "gpt-image-2",
